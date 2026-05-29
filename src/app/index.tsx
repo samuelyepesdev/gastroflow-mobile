@@ -1,98 +1,160 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  ActivityIndicator,
+  RefreshControl,
+  SafeAreaView,
+  StatusBar,
+} from 'react-native';
+import { useAuth } from '../context/AuthContext';
+import api from '../services/api';
+import { styles } from '../styles/home.styles'; // Importación de estilos externos
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
+// Interfaz para definir el modelo de la Mesa
+interface Mesa {
+  id: number;
+  numero: string | number;
+  capacidad: number;
+  estado: 'libre' | 'ocupada' | 'reservada' | string;
+  pedido_activo_id?: number | null;
 }
 
+/**
+ * Pantalla Principal: Listado de Mesas de GastroFlow.
+ * Aplica el principio SRP separando la hoja de estilos a un archivo externo.
+ */
 export default function HomeScreen() {
+  const { user, logout } = useAuth();
+  const [mesas, setMesas] = useState<Mesa[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
+
+  // Función para obtener las mesas desde el endpoint seguro del backend
+  const fetchMesas = async () => {
+    try {
+      setError('');
+      const response = await api.get('/api/mesas');
+      
+      // Manejar la estructura de respuesta (sea el array directo o envoltura { mesas })
+      const data = response.data.mesas || response.data || [];
+      setMesas(data);
+    } catch (err: any) {
+      console.error('Error al obtener mesas:', err);
+      setError('No se pudieron cargar las mesas del restaurante. Arrastra para reintentar.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMesas();
+  }, []);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchMesas();
+  };
+
+  // Renderizado individual de cada tarjeta de Mesa
+  const renderMesaItem = ({ item }: { item: Mesa }) => {
+    const isOccupied = item.estado?.toLowerCase() === 'ocupada';
+    const isReserved = item.estado?.toLowerCase() === 'reservada';
+    
+    let statusColor = '#2E7D32'; // Verde para libre
+    let statusText = 'Libre';
+    
+    if (isOccupied) {
+      statusColor = '#C62828'; // Rojo para ocupada
+      statusText = 'Ocupada';
+    } else if (isReserved) {
+      statusColor = '#EF6C00'; // Naranja para reservada
+      statusText = 'Reservada';
+    }
+
+    return (
+      <TouchableOpacity 
+        style={[styles.mesaCard, { borderColor: statusColor + '44' }]}
+        activeOpacity={0.7}
+      >
+        {/* Indicador superior de estado */}
+        <View style={[styles.mesaStatusIndicator, { backgroundColor: statusColor }]} />
+        <View style={styles.mesaCardBody}>
+          <Text style={styles.mesaNumber}>Mesa {item.numero}</Text>
+          <Text style={styles.mesaCapacity}>Capacidad: {item.capacidad} personas</Text>
+          <View style={styles.statusBadgeContainer}>
+            <View style={[styles.statusBadge, { backgroundColor: statusColor + '22' }]}>
+              <Text style={[styles.statusBadgeText, { color: statusColor }]}>{statusText}</Text>
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      
+      {/* Encabezado: Perfil del usuario y botón de salida */}
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.welcomeText}>Hola, {user?.nombre || 'Mesero'}</Text>
+          <Text style={styles.roleText}>{String(user?.rol || 'Mesero').toUpperCase()}</Text>
+        </View>
+        <TouchableOpacity style={styles.logoutButton} onPress={logout}>
+          <Text style={styles.logoutButtonText}>Salir</Text>
+        </TouchableOpacity>
+      </View>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+      {/* Contenido Principal: Rejilla de Mesas */}
+      <View style={styles.content}>
+        <Text style={styles.sectionTitle}>Salón Principal</Text>
+        <Text style={styles.sectionSubtitle}>Selecciona una mesa para tomar comandas o ver estado</Text>
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
+        {loading ? (
+          <View style={styles.centerContainer}>
+            <ActivityIndicator size="large" color="#FF6F00" />
+            <Text style={styles.loadingText}>Cargando mesas...</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.centerContainer}>
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={fetchMesas}>
+              <Text style={styles.retryButtonText}>Reintentar</Text>
+            </TouchableOpacity>
+          </View>
+        ) : mesas.length === 0 ? (
+          <FlatList
+            data={[]}
+            renderItem={null}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF6F00" />
+            }
+            ListEmptyComponent={
+              <View style={styles.centerContainer}>
+                <Text style={styles.emptyText}>No hay mesas configuradas en este restaurante.</Text>
+              </View>
+            }
           />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
+        ) : (
+          <FlatList
+            data={mesas}
+            renderItem={renderMesaItem}
+            keyExtractor={(item) => item.id.toString()}
+            numColumns={2}
+            columnWrapperStyle={styles.gridRow}
+            contentContainerStyle={styles.gridContainer}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF6F00" />
+            }
           />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+        )}
+      </View>
+    </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
-  },
-});
